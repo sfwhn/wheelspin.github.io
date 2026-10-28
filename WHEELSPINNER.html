@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wheel Spinner — Pick & Remove</title>
+<style>
+  :root { --ink:#172033; --accent:#6d5dfc; --bg:#f4f6fb; }
+  * { box-sizing:border-box }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width:1050px; margin:0 auto; padding:28px 18px 45px; }
+  h1 { margin:0 0 6px; font-size:clamp(1.7rem,4vw,2.5rem); }
+  .sub { color:#647087; margin:0 0 22px; }
+  .layout { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(290px,.85fr); gap:22px; align-items:start; }
+  .panel { background:white; border-radius:18px; padding:20px; box-shadow:0 8px 28px #1720330b; }
+  .wheel-wrap { position:relative; width:min(100%,520px); margin:4px auto 18px; }
+  canvas { width:100%; height:auto; display:block; }
+  .pointer { position:absolute; top:-4px; left:50%; transform:translateX(-50%); width:0;height:0; border-left:17px solid transparent;border-right:17px solid transparent;border-top:34px solid #172033; z-index:2; filter:drop-shadow(0 2px 2px #0002); }
+  .center { position:absolute; left:50%;top:50%; transform:translate(-50%,-50%); width:76px;height:76px;border-radius:50%;background:white;border:7px solid #172033;display:grid;place-items:center;font-weight:900;font-size:13px;box-shadow:0 2px 8px #0002;pointer-events:none; }
+  button { border:0;border-radius:11px;padding:11px 15px;font-weight:750;cursor:pointer;font-size:14px; }
+  button:disabled { opacity:.45;cursor:not-allowed; }
+  .primary { background:var(--accent);color:white; }
+  .secondary { background:#eef0f7;color:#29334b; }
+  .danger { background:#fff0f0;color:#b42318; }
+  .actions { display:flex;gap:10px;justify-content:center;flex-wrap:wrap; }
+  label { display:block;font-weight:700;font-size:14px;margin:12px 0 7px; }
+  input { width:100%;border:1px solid #d9deea;border-radius:10px;padding:10px 11px;font:inherit;outline-color:var(--accent); }
+  .hint { color:#68738a;font-size:13px;line-height:1.5;margin:8px 0; }
+  .result { text-align:center;min-height:52px;font-size:20px;font-weight:850;margin:12px 0 0; }
+  .pill { display:inline-block;background:#f0edff;color:#5143cf;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:800;margin-bottom:8px; }
+  .listhead { display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:18px; }
+  .listhead h3 { margin:0;font-size:16px; }
+  ol { margin:10px 0 0;padding-left:24px; }
+  li { padding:5px 0;overflow-wrap:anywhere; }
+  .name-editor { display:grid; gap:8px; margin-top:10px; }
+  .name-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }
+  .name-row input { min-width:0; }
+  .name-row button { padding:9px 11px; }
+  .empty { color:#7a8498;font-size:14px; }
+  @media(max-width:760px){.layout{grid-template-columns:1fr}.panel{padding:16px}}
+</style>
+</head>
+<body>
+<main>
+  <h1>🎡 Wheel Spinner</h1>
+  <p class="sub"></p>
+  <div class="layout">
+    <section class="panel">
+      <div class="wheel-wrap">
+        <div class="pointer"></div>
+        <canvas id="wheel" width="700" height="700" aria-label="Roda nama"></canvas>
+        <div class="center">SPIN</div>
+      </div>
+      <div class="actions">
+        <button class="primary" id="spinBtn">PUTAR RODA</button>
+        <button class="secondary" id="resetBtn">Reset</button>
+      </div>
+      <div class="result" id="result" aria-live="polite">Siap untuk spin!</div>
+    </section>
+    <aside class="panel">
+      <span class="pill">DAFTAR NAMA</span>
+      <p class="hint">Edit nama satu per satu, hapus nama, atau tambahkan nama baru. Klik “Terapkan” untuk memperbarui roda.</p>
+      <div id="nameEditor" class="name-editor"></div>
+      <div class="actions" style="justify-content:flex-start;margin-top:12px">
+        <button class="secondary" id="addBtn">＋ Tambah nama</button>
+        <button class="primary" id="loadBtn">Terapkan</button>
+      </div>
+      <div class="listhead"><h3>Nama tersisa</h3><strong id="count">0</strong></div>
+      <ol id="remaining"></ol>
+      <div class="listhead"><h3>Hasil terpilih</h3></div>
+      <ol id="picked"></ol>
+    </aside>
+  </div>
+</main>
+<script>
+(() => {
+  
+  const FIXED_FIRST_NAME = "sherly";
+
+  const INITIAL_NAMES = [
+    "sherly", "cempaka", "Yulia", "reva",
+  ];
+
+  const canvas = document.getElementById('wheel');
+  const ctx = canvas.getContext('2d');
+  const editor = document.getElementById('nameEditor');
+  const spinBtn = document.getElementById('spinBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const loadBtn = document.getElementById('loadBtn');
+  const addBtn = document.getElementById('addBtn');
+  const result = document.getElementById('result');
+  const remainingList = document.getElementById('remaining');
+  const pickedList = document.getElementById('picked');
+  const count = document.getElementById('count');
+
+  let original = [...INITIAL_NAMES];
+  let remaining = [...original];
+  let picked = [];
+  let angle = 0;
+  let spinning = false;
+  let firstPending = true;
+  const colors = ['#7465f7','#f7b84b','#36b6a3','#f16d83','#5687e8','#a17be8','#f28c52','#55b8d9'];
+
+  function renderEditor(names = original) {
+    editor.innerHTML = '';
+    names.forEach((name, index) => {
+      const row = document.createElement('div');
+      row.className = 'name-row';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = name;
+      input.placeholder = `Nama ${index + 1}`;
+      input.setAttribute('aria-label', `Nama ${index + 1}`);
+      input.addEventListener('input', () => { original[index] = input.value; });
+      const remove = document.createElement('button');
+      remove.className = 'danger';
+      remove.type = 'button';
+      remove.textContent = 'Hapus';
+      remove.setAttribute('aria-label', `Hapus nama ${index + 1}`);
+      remove.addEventListener('click', () => {
+        original.splice(index, 1);
+        renderEditor(original);
+      });
+      row.append(input, remove);
+      editor.appendChild(row);
+    });
+  }
+
+  function applyNames() {
+    const inputs = [...editor.querySelectorAll('input')];
+    const clean = inputs.map(input => input.value.trim()).filter(Boolean);
+    original = [...new Set(clean)];
+    remaining = [...original];
+    picked = [];
+    firstPending = true;
+    angle = 0;
+    result.textContent = 'Siap untuk spin!';
+    renderEditor(original);
+    render();
+  }
+
+  function render() {
+    drawWheel();
+    count.textContent = remaining.length;
+    remainingList.innerHTML = '';
+    remaining.forEach(n => {
+      const li = document.createElement('li');
+      li.textContent = n;
+      remainingList.appendChild(li);
+    });
+    pickedList.innerHTML = '';
+    picked.forEach(n => {
+      const li = document.createElement('li');
+      li.textContent = n;
+      pickedList.appendChild(li);
+    });
+    if (!remaining.length) {
+      spinBtn.disabled = true;
+      if (picked.length) result.textContent = 'Semua nama sudah terpilih!';
+    } else {
+      spinBtn.disabled = spinning;
+    }
+  }
+
+  function drawWheel() {
+    const w = canvas.width, cx = w/2, cy = w/2, r = w/2 - 12;
+    ctx.clearRect(0,0,w,w);
+    if (!remaining.length) {
+      ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle='#e8eaf2'; ctx.fill();
+      ctx.fillStyle='#657087';ctx.font='bold 28px system-ui';ctx.textAlign='center';ctx.fillText('Nama habis',cx,cy);
+      return;
+    }
+    const slice = Math.PI*2/remaining.length;
+    remaining.forEach((name,i) => {
+      const start = angle - Math.PI/2 + i*slice;
+      const end = start + slice;
+      ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,start,end);ctx.closePath();
+      ctx.fillStyle=colors[i%colors.length];ctx.fill();
+      ctx.strokeStyle='#fff';ctx.lineWidth=4;ctx.stroke();
+      ctx.save();ctx.translate(cx,cy);ctx.rotate(start+slice/2);
+      ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillStyle='#fff';
+      const fontSize = Math.max(14, Math.min(25, 280/Math.max(remaining.length,1)));
+      ctx.font=`bold ${fontSize}px system-ui`;
+      let label = name;
+      if (label.length > 20) label = label.slice(0,18)+'…';
+      ctx.shadowColor='#0003';ctx.shadowBlur=2;
+      ctx.fillText(label,r-28,0);ctx.restore();
+    });
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=8;ctx.stroke();
+  }
+
+  function selectedIndex() {
+    if (firstPending) {
+      const found = remaining.findIndex(n => n.toLowerCase() === FIXED_FIRST_NAME.trim().toLowerCase());
+      if (found >= 0) return found;
+    }
+    return Math.floor(Math.random()*remaining.length);
+  }
+
+  function spin() {
+    if (spinning || !remaining.length) return;
+    const targetIndex = selectedIndex();
+    const slice = Math.PI*2/remaining.length;
+    const targetMod = ((-targetIndex*slice) - slice/2 + Math.PI*2) % (Math.PI*2);
+    const currentMod = ((angle % (Math.PI*2)) + Math.PI*2) % (Math.PI*2);
+    let delta = (targetMod - currentMod + Math.PI*2) % (Math.PI*2);
+    delta += (5 + Math.floor(Math.random()*3))*Math.PI*2;
+    const startAngle = angle;
+    const endAngle = angle + delta;
+    const duration = 4200;
+    const startTime = performance.now();
+    spinning = true;
+    spinBtn.disabled = true;
+    result.textContent = 'Rodanya sedang berputar…';
+
+    function animate(now) {
+      const t = Math.min(1,(now-startTime)/duration);
+      const eased = 1-Math.pow(1-t,4);
+      angle = startAngle+(endAngle-startAngle)*eased;
+      drawWheel();
+      if(t<1) requestAnimationFrame(animate);
+      else {
+        angle = endAngle;
+        const winner = remaining.splice(targetIndex,1)[0];
+        picked.push(winner);
+        firstPending = false;
+        spinning = false;
+        result.textContent = '🎉 Terpilih: ' + winner;
+        render();
+      }
+    }
+    requestAnimationFrame(animate);
+  }
+
+  addBtn.addEventListener('click', () => {
+    original.push('');
+    renderEditor(original);
+  });
+  spinBtn.addEventListener('click',spin);
+  loadBtn.addEventListener('click',applyNames);
+  resetBtn.addEventListener('click',applyNames);
+  renderEditor(original);
+  render();
+})();
+</script>
+</body>
+</html>
